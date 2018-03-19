@@ -33,14 +33,13 @@ from golem.network.p2p.node import Node
 from golem.network.p2p.peersession import PeerSessionInfo
 from golem.report import StatusPublisher
 from golem.resource.dirmanager import DirManager
-from golem.rpc.mapping.rpceventnames import UI, Environment
+from golem.rpc.mapping.rpceventnames import UI, Environment, Golem
 from golem.task.taskbase import Task
 from golem.task.taskserver import TaskServer
 from golem.task.taskstate import TaskState, TaskStatus, SubtaskStatus, \
     TaskTestStatus
 from golem.tools.assertlogs import LogTestCase
-from golem.tools.testwithdatabase import TestWithDatabase
-from golem.tools.testwithreactor import TestWithReactor
+from golem.tools.testwithreactor import TestWithReactor, TestDatabaseWithReactor
 from golem.utils import decode_hex, encode_hex
 
 random = Random(__name__)
@@ -78,7 +77,7 @@ def done_deferred(return_value=None):
 )
 @patch('signal.signal')
 @patch('golem.network.p2p.node.Node.collect_network_info')
-class TestClient(TestWithDatabase, TestWithReactor):
+class TestClient(TestDatabaseWithReactor):
     # FIXME: if we someday decide to run parallel tests,
     # this may completely break. Issue #2456
     # pylint: disable=attribute-defined-outside-init
@@ -86,6 +85,7 @@ class TestClient(TestWithDatabase, TestWithReactor):
     def tearDown(self):
         if hasattr(self, 'client'):
             self.client.quit()
+        super().tearDown()
 
     def test_get_payments(self, *_):
         self.client = Client(
@@ -917,11 +917,11 @@ def make_mock_payment_processor(sci, eth=100, gnt=100):
 
 @patch('signal.signal')
 @patch('golem.network.p2p.node.Node.collect_network_info')
-class TestClientRPCMethods(TestWithDatabase, LogTestCase):
+class TestClientRPCMethods(TestDatabaseWithReactor, LogTestCase):
     def setUp(self):
-        super(TestClientRPCMethods, self).setUp()
+        super().setUp()
         with patch('golem.network.concent.handlers_library.HandlersLibrary'
-                   '.register_handler', ):
+                   '.register_handler'):
             apps_manager = AppsManager(False)
             apps_manager.load_all_apps()
             client = Client(
@@ -955,6 +955,7 @@ class TestClientRPCMethods(TestWithDatabase, LogTestCase):
 
     def tearDown(self):
         self.client.quit()
+        super().tearDown()
 
     def test_node(self, *_):
         c = self.client
@@ -1396,20 +1397,29 @@ class TestClientRPCMethods(TestWithDatabase, LogTestCase):
     def test_golem_version(self, *_):
         assert self.client.get_golem_version() == golem.__version__
 
-    def test_golem_status(self, *_):
-        status = 'component', 'method', 'stage', 'data'
-
-        # no statuses published
-        assert not self.client.get_golem_status()
+    def test_golem_status_no_publisher(self, *_):
+        component = 'component'
+        status = 'method', 'stage', 'data'
 
         # status published, no rpc publisher
-        StatusPublisher.publish(*status)
-        assert not self.client.get_golem_status()
+        StatusPublisher.publish(component, *status)
+        assert self.client.get_golem_status()[component] == status
+
+    def test_golem_status_with_publisher(self, *_):
+        component = 'component'
+        status = 'method', 'stage', 'data'
 
         # status published, with rpc publisher
         StatusPublisher._rpc_publisher = Mock()
-        StatusPublisher.publish(*status)
-        assert self.client.get_golem_status() == status
+        StatusPublisher.publish(component, *status)
+        assert self.client.get_golem_status()[component] == status
+
+        time.sleep(0.01)
+
+        assert StatusPublisher._rpc_publisher.publish.called
+        call = StatusPublisher._rpc_publisher.publish.call_args
+        assert call[0][0] == Golem.evt_golem_status
+        assert call[0][1][component] == status
 
     def test_port_status(self, *_):
         port = random.randint(1, 65535)
