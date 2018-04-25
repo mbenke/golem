@@ -1293,6 +1293,16 @@ class Client(HardwarePresetsMixin):
     def enable_talkback(value):
         enable_sentry_logger(value)
 
+    def block_node(self, node_id: str) -> Tuple[bool, Optional[str]]:
+        try:
+            assert isinstance(self.task_server, TaskServer)
+            self.task_server.acl.disallow(node_id, persist=True)
+            return True, None
+        except AssertionError:
+            return False, 'Client is not ready'
+        except Exception as e:  # pylint: disable=broad-except
+            return False, str(e)
+
 
 class DoWorkService(LoopingCallService):
     _client = None  # type: Client
